@@ -1,56 +1,87 @@
+from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 import os
-from uuid import uuid4
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from supabase import Client, create_client
+from rag.rag_engine import RAGEngine
 
-load_dotenv()
+app = FastAPI()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "raw-files")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("SUPABASE_URL oder SUPABASE_KEY fehlt in .env")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-app = FastAPI(title="Community RAG MVP")
+engine = RAGEngine()
 
 
+# =====================================================
+# CORS
+# =====================================================
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# =====================================================
+# MODEL
+# =====================================================
+class QueryRequest(BaseModel):
+    query: str
+
+
+# =====================================================
+# HEALTH
+# =====================================================
 @app.get("/")
 def root():
-    return {"status": "Community RAG MVP ready 🚀"}
+    return {"status": "ok"}
 
 
+# =====================================================
+# CHAT
+# =====================================================
+@app.post("/chat")
+def chat(request: QueryRequest):
+    result = engine.query(request.query)
+
+    return {
+        "answer": result.get("answer", ""),
+        "sources": result.get("sources", []),
+    }
+
+
+# =====================================================
+# STREAM CHAT
+# =====================================================
+@app.post("/chat/stream")
+def chat_stream(request: QueryRequest):
+
+    def generate():
+        for chunk in engine.stream_query(request.query):
+            yield chunk
+
+    return StreamingResponse(generate(), media_type="text/plain")
+
+
+# =====================================================
+# UPLOAD
+# =====================================================
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
-    try:
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail="Datei ist leer")
 
-        suffix = os.path.splitext(file.filename or "")[1]
-        storage_path = f"uploads/{uuid4().hex}{suffix}"
+    print("📄 FILE RECEIVED:", file.filename)
 
-        result = supabase.storage.from_(SUPABASE_BUCKET).upload(
-            path=storage_path,
-            file=content,
-            file_options={
-                "content-type": file.content_type or "application/octet-stream",
-                "upsert": "false",
-            },
-        )
+    os.makedirs("uploads", exist_ok=True)
 
-        return {
-            "status": "uploaded",
-            "bucket": SUPABASE_BUCKET,
-            "path": storage_path,
-            "filename": file.filename,
-            "content_type": file.content_type,
-            "supabase_result": str(result),
-        }
+    file_path = f"uploads/{file.filename}"
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Upload fehlgeschlagen: {e}")
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+
+    return {
+        "status": "uploaded",
+        "filename": file.filename,
+    }

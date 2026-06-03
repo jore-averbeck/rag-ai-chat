@@ -1,8 +1,31 @@
 .venv/
-node_modules/
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Env Files
 .env
-.venv/
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
 node_modules/
-__pycache__/
-.env
+.next/
+out/
+dist/
+
+.DS_Store
+.vscode/
+.idea/
+
+uploads/
+data/
+
+models/
+*.gguf
+
+supabase/.temp/
