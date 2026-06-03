@@ -10,10 +10,6 @@ app = FastAPI()
 
 engine = RAGEngine()
 
-
-# =====================================================
-# CORS
-# =====================================================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -25,24 +21,15 @@ app.add_middleware(
 )
 
 
-# =====================================================
-# MODEL
-# =====================================================
 class QueryRequest(BaseModel):
     query: str
 
 
-# =====================================================
-# HEALTH
-# =====================================================
 @app.get("/")
 def root():
     return {"status": "ok"}
 
 
-# =====================================================
-# CHAT
-# =====================================================
 @app.post("/chat")
 def chat(request: QueryRequest):
     result = engine.query(request.query)
@@ -53,9 +40,6 @@ def chat(request: QueryRequest):
     }
 
 
-# =====================================================
-# STREAM CHAT
-# =====================================================
 @app.post("/chat/stream")
 def chat_stream(request: QueryRequest):
 
@@ -66,9 +50,6 @@ def chat_stream(request: QueryRequest):
     return StreamingResponse(generate(), media_type="text/plain")
 
 
-# =====================================================
-# UPLOAD
-# =====================================================
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
 
