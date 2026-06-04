@@ -7,15 +7,9 @@ import Header from "@/components/Layout/Header";
 import ChatWindow from "@/components/Chat/ChatWindow";
 import ChatInput from "@/components/Chat/ChatInput";
 
-import {
-  streamChatMessage,
-  uploadPDF,
-} from "@/lib/api";
+import { streamChatMessage, uploadPDF } from "@/lib/api";
 
-type Message = {
-  role: "user" | "assistant";
-  content: string;
-};
+import { useChats } from "@/hooks/useChats";
 
 type KnowledgeState =
   | "idle"
@@ -25,257 +19,151 @@ type KnowledgeState =
   | "error";
 
 export default function Home() {
-
-  // =====================================================
-  // STATE
-  // =====================================================
-  const [messages, setMessages] = useState<Message[]>([]);
+  const {
+    chats,
+    activeChat,
+    activeChatId,
+    createChat,
+    renameChat,
+    deleteChat,
+    updateMessages,
+    setActiveChatId,
+  } = useChats();
 
   const [loading, setLoading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  const [selectedFile, setSelectedFile] =
-    useState<File | null>(null);
-
-  const [knowledgeState, setKnowledgeState] =
-    useState<KnowledgeState>("idle");
-
-
-  function handleUpload(file: File) {
-
-    console.log("📄 FILE STORED:", file);
-
-    setSelectedFile(file);
-
-    setKnowledgeState("file_selected");
-  }
-
+  const [knowledge, setKnowledge] = useState<{
+    state: KnowledgeState;
+    fileName: string | null;
+  }>({
+    state: "idle",
+    fileName: null,
+  });
 
   
-  async function handleSend(message: string) {
+  function handleUpload(file: File) {
+    setSelectedFile(file);
 
-    console.log("🔥 HANDLE SEND:", message);
+    setKnowledge({
+      state: "file_selected",
+      fileName: file.name,
+    });
+  }
+
+ 
+  async function handleSend(message: string) {
+    if (!activeChat) return;
 
     const hasText = message.trim().length > 0;
-
     const hasFile = !!selectedFile;
 
-    
-    if (!hasText && !hasFile) {
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content:
-            "⚠️ Bitte lade ein Dokument hoch oder stelle eine Frage.",
-        },
-      ]);
-
-      return;
-    }
+    if (!hasText && !hasFile) return;
 
     setLoading(true);
 
     try {
-
-      
-      if (hasFile && knowledgeState !== "ready") {
-
-        setKnowledgeState("processing");
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content:
-              "📄 Dokument wird verarbeitet...",
-          },
-        ]);
-
-        console.log("📤 UPLOAD START");
+      // PDF
+      if (hasFile && knowledge.state !== "ready") {
+        setKnowledge({
+          state: "processing",
+          fileName: selectedFile!.name,
+        });
 
         const result = await uploadPDF(selectedFile!);
 
-        console.log("📤 UPLOAD DONE:", result);
-
-        if (
-          result?.status === "uploaded" ||
-          result?.status === "done"
-        ) {
-
-          setKnowledgeState("ready");
-
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content:
-                "🧠 Dokument verarbeitet. Deine Wissensdatenbank wurde erweitert. Du kannst mir jetzt Fragen zu diesem oder anderen Dokumenten stellen.",
-            },
-          ]);
+        if (result?.status === "uploaded") {
+          setKnowledge({
+            state: "ready",
+            fileName: selectedFile!.name,
+          });
 
           setSelectedFile(null);
-
         } else {
-
-          setKnowledgeState("error");
-
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content:
-                "❌ Fehler beim Verarbeiten des Dokuments.",
-            },
-          ]);
+          setKnowledge({
+            state: "error",
+            fileName: selectedFile?.name ?? null,
+          });
         }
       }
 
-
-      
+   
       if (hasText) {
+        const isFirst = activeChat.messages.length === 0;
 
-        
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "user",
-            content: message,
-          },
-          {
-            role: "assistant",
-            content: "",
-          },
+        updateMessages(activeChat.id, (msgs) => [
+          ...msgs,
+          { role: "user", content: message },
+          { role: "assistant", content: "" },
         ]);
 
-        console.log("💬 STREAM START");
+        if (isFirst) {
+          renameChat(activeChat.id, message.slice(0, 30));
+        }
 
-        
-        await streamChatMessage(
-          message,
-          (chunk) => {
+        await streamChatMessage(message, (chunk) => {
+          updateMessages(activeChat.id, (msgs) => {
+            const copy = [...msgs];
+            const last = copy.length - 1;
 
-            console.log("⚡ CHUNK:", chunk);
+            copy[last] = {
+              ...copy[last],
+              content: copy[last].content + chunk,
+            };
 
-            setMessages((prev) => {
-
-              const updated = [...prev];
-
-              const lastIndex =
-                updated.length - 1;
-
-              updated[lastIndex] = {
-                ...updated[lastIndex],
-                content:
-                  updated[lastIndex].content +
-                  chunk.replace(/\n/g, "\n"),
-              };
-
-              return updated;
-            });
-          }
-        );
-
-        console.log("✅ STREAM DONE");
+            return copy;
+          });
+        });
       }
-
-    } catch (err) {
-
-      console.error("❌ ERROR:", err);
-
-      setKnowledgeState("error");
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content:
-            "❌ Fehler im System bei der Verarbeitung.",
-        },
-      ]);
-
     } finally {
-
       setLoading(false);
     }
   }
 
-
-  
   return (
-
     <div className="h-screen flex bg-background">
 
-      {/* SIDEBAR */}
-      <Sidebar />
+      <Sidebar
+        chats={chats}
+        activeChatId={activeChatId}
+        onNewChat={createChat}
+        onSelectChat={setActiveChatId}
+        onRenameChat={renameChat}
+        onDeleteChat={deleteChat}
+      />
 
-      {/* MAIN */}
       <main className="flex-1 flex flex-col">
 
         <Header />
 
         <div className="flex-1 flex flex-col px-6 pt-6 gap-4">
 
-          {/* CHAT */}
-          <div className="flex-1 overflow-hidden rounded-xl">
+          <ChatWindow
+            messages={activeChat?.messages || []}
+            loading={loading}
+          />
 
-            <ChatWindow
-              messages={messages}
-              loading={loading}
-            />
+          <ChatInput
+            onSend={handleSend}
+            onUpload={handleUpload}
+            loading={loading}
+            selectedFile={selectedFile}
+            setSelectedFile={setSelectedFile}
+          />
 
-          </div>
+          <div className="text-sm text-gray-500">
+            {knowledge.state === "file_selected" &&
+              `📄 ${knowledge.fileName} ausgewählt`}
 
+            {knowledge.state === "processing" &&
+              `⏳ ${knowledge.fileName} wird verarbeitet`}
 
-          {/* INPUT AREA */}
-          <div className="pb-4 flex flex-col gap-2">
-
-            {/* =====================================================
-                KNOWLEDGE STATUS
-            ===================================================== */}
-
-            {knowledgeState === "file_selected" && (
-              <div className="text-sm text-gray-500">
-                📄 Dokument ausgewählt
-              </div>
-            )}
-
-            {knowledgeState === "processing" && (
-              <div className="text-sm text-blue-600">
-                ⏳ Dokument wird verarbeitet...
-              </div>
-            )}
-
-            {knowledgeState === "ready" && (
-              <div className="text-sm text-green-600">
-                🧠 Wissensdatenbank erweitert.
-              </div>
-            )}
-
-            {knowledgeState === "error" && (
-              <div className="text-sm text-red-600">
-                ❌ Fehler beim Verarbeiten des Dokuments.
-              </div>
-            )}
-
-
-            {/* =====================================================
-                CHAT INPUT
-            ===================================================== */}
-            <ChatInput
-              onSend={handleSend}
-              onUpload={handleUpload}
-              loading={loading}
-              selectedFile={selectedFile}
-              setSelectedFile={setSelectedFile}
-            />
-
+            {knowledge.state === "ready" &&
+              `🧠 ${knowledge.fileName} fertig`}
           </div>
 
         </div>
-
       </main>
-
     </div>
   );
 }

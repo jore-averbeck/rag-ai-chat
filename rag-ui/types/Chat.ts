@@ -1,8 +1,10 @@
 export type Message = {
-    role: "user" | "assistant";
-    content: string;
-    sources?: {
-      document: string;
-      chunk: number;
-    }[];
-  };
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type Chat = {
+  id: string;
+  title: string;
+  messages: Message[];
+};
